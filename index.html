@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pipette – sélection multiple, palette & export</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #000; color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            min-height: 100vh; margin: 0;
+            background: radial-gradient(circle at 20% 30%, #1a1a2e, #000);
+        }
+        .app-container {
+            display: flex; flex-direction: column; align-items: center;
+            padding: 20px; gap: 20px; width: 95%; max-width: 900px;
+            background: rgba(17,17,17,0.9); border-radius: 16px;
+            box-shadow: 0 4px 25px rgba(0,210,255,0.3);
+            backdrop-filter: blur(10px);
+            position: relative;
+        }
+        h1 { color: #00d2ff; margin-bottom: 5px; font-size: 2rem; }
+        .info { color: #aaa; font-size: 14px; text-align: center; }
+        .controls {
+            display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; align-items: center; width: 100%;
+        }
+        #pipetteBtn, #handBtn, #paletteBtn, #exportBtn, .zoom-btn {
+            background-color: #333; color: #fff; border: 2px solid #555;
+            padding: 10px 20px; border-radius: 30px; cursor: pointer; font-size: 16px;
+            transition: all 0.2s; display: flex; align-items: center; gap: 8px;
+            user-select: none;
+        }
+        #pipetteBtn.active {
+            background-color: #00d2ff; border-color: #00d2ff; color: #000;
+            font-weight: bold; box-shadow: 0 0 15px #00d2ff;
+        }
+        #handBtn.active {
+            background-color: #ff0000; border-color: #ff0000; color: #000;
+            font-weight: bold; box-shadow: 0 0 15px #ff0000;
+        }
+        #paletteBtn, #exportBtn {
+            background-color: #444;
+        }
+        .zoom-group {
+            display: flex; align-items: center; gap: 5px;
+            background: #222; padding: 5px 10px; border-radius: 30px;
+        }
+        .zoom-btn {
+            padding: 5px 12px; font-size: 18px; min-width: 40px; justify-content: center;
+        }
+        #zoomLevelDisplay {
+            font-family: monospace; min-width: 50px; text-align: center;
+        }
+        .image-wrapper {
+            position: relative;
+            max-width: 100%;
+            max-height: 70vh;
+            overflow: auto;
+            border: 2px solid #444;
+            border-radius: 12px;
+            background: #000;
+            display: inline-block;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+        }
+        #canvasContainer {
+            position: relative;
+            width: fit-content;
+            height: fit-content;
+            line-height: 0;
+        }
+        #canvas {
+            display: block;
+            image-rendering: pixelated; image-rendering: crisp-edges;
+        }
+        #overlayCanvas {
+            position: absolute;
+            top: 0; left: 0;
+            pointer-events: none;
+            z-index: 2;
+            image-rendering: pixelated; image-rendering: crisp-edges;
+        }
+        .result-area {
+            display: flex; flex-direction: column; align-items: center; gap: 15px;
+            width: 100%; max-width: 400px;
+        }
+        .color-result {
+            display: flex; align-items: center; gap: 15px; padding: 12px 20px;
+            border: 1px solid #444; border-radius: 40px; background: #222;
+            width: 100%; justify-content: space-between;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        .color-swatch {
+            width: 48px; height: 48px; border-radius: 50%; border: 2px solid #888;
+            background: #fff; transition: background 0.2s, box-shadow 0.2s;
+        }
+        .color-text {
+            font-family: 'Courier New', monospace; font-size: 20px; font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .history {
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+            min-height: 30px; width: 100%;
+        }
+        .history-swatch {
+            width: 28px; height: 28px; border-radius: 6px; border: 1px solid #666;
+            cursor: pointer; transition: transform 0.1s;
+        }
+        .history-swatch:hover { transform: scale(1.2); border-color: white; }
+        input[type="file"]::file-selector-button {
+            background: #444; color: white; border: 1px solid #555;
+            padding: 10px 18px; border-radius: 30px; cursor: pointer; margin-right: 10px;
+            font-weight: bold;
+        }
+        input[type="file"]::file-selector-button:hover { background: #555; }
+        .shortcut-hint { color: #777; font-size: 12px; }
+        /* Modales */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: #222;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #444;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            color: white;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: white;
+        }
+        #svgInput {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            background: #111;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 8px;
+            font-family: monospace;
+        }
+        #importPaletteBtn {
+            background: #444;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+        }
+        .export-option {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 12px 20px;
+            margin: 8px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        .export-option:hover {
+            background: #444;
+        }
+    </style>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4b6cb7">
+<link rel="apple-touch-icon" href="icon.png"></head>
+<body>
+    <div class="app-container">
+        <h1>🎨 Pipette – Sélection multiple & Palette</h1>
+        <p class="info">Charge une image, active un outil, zoome. Exportez en PNG, PNG transparent ou SVG.</p>
+        
+        <div class="controls">
+            <input type="file" id="fileInput" accept="image/*" />
+            <button id="pipetteBtn"><span>🧪</span> Pipette</button>
+            <button id="handBtn"><span>🖐️</span> Hand Google</button>
+            <button id="paletteBtn"><span>🎨</span> Palette</button>
+            <button id="exportBtn"><span>💾</span> Exporter</button>
+            <div class="zoom-group">
+                <button class="zoom-btn" id="zoomOutBtn">−</button>
+                <span id="zoomLevelDisplay">100%</span>
+                <button class="zoom-btn" id="zoomInBtn">+</button>
+            </div>
+        </div>
+        <span class="shortcut-hint">⌨️ Raccourci : [Espace] pour basculer la pipette</span>
+
+        <div class="image-wrapper">
+            <div id="canvasContainer">
+                <canvas id="canvas"></canvas>
+                <canvas id="overlayCanvas"></canvas>
+            </div>
+        </div>
+
+        <div class="result-area">
+            <div class="color-result">
+                <div class="color-swatch" id="colorSwatch"></div>
+                <span class="color-text" id="colorText">#ffffff</span>
+            </div>
+            <div class="history" id="historyContainer"></div>
+        </div>
+    </div>
+
+    <!-- Modale palette -->
+    <div id="paletteModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Collez votre SVG de palette</h2>
+            <textarea id="svgInput" rows="10" placeholder="<svg ...>...</svg>"></textarea>
+            <button id="importPaletteBtn">Importer les couleurs</button>
+        </div>
+    </div>
+
+    <!-- Modale export -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="closeExportModal">&times;</span>
+            <h2>Exporter l'image</h2>
+            <button class="export-option" id="exportPNGBtn">🖼️ PNG (normal)</button>
+            <button class="export-option" id="exportTransparentPNGBtn">✨ PNG transparent (fond noir transparent)</button>
+            <button class="export-option" id="exportSVGBtn">📐 SVG (vectoriel)</button>
+        </div>
+    </div>
+
+    <script>
+        // ---------- DOM ----------
+        const fileInput = document.getElementById('fileInput');
+        const pipetteBtn = document.getElementById('pipetteBtn');
+        const handBtn = document.getElementById('handBtn');
+        const paletteBtn = document.getElementById('paletteBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const overlayCanvas = document.getElementById('overlayCanvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
+        const colorSwatch = document.getElementById('colorSwatch');
+        const colorText = document.getElementById('colorText');
+        const historyContainer = document.getElementById('historyContainer');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+        const zoomLevelDisplay = document.getElementById('zoomLevelDisplay');
+        const paletteModal = document.getElementById('paletteModal');
+        const closeModalBtn = document.querySelector('.close');
+        const svgInput = document.getElementById('svgInput');
+        const importPaletteBtn = document.getElementById('importPaletteBtn');
+        const exportModal = document.getElementById('exportModal');
+        const closeExportModal = document.getElementById('closeExportModal');
+        const exportPNGBtn = document.getElementById('exportPNGBtn');
+        const exportTransparentPNGBtn = document.getElementById('exportTransparentPNGBtn');
+        const exportSVGBtn = document.getElementById('exportSVGBtn');
+
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+
+        let isPipetteActive = false;
+        let isHandActive = false;
+        let imageLoaded = false;
+        let currentHex = '#ffffff';
+        const colorHistory = [];
+        let zoomLevel = 1;
+        let selectedRegions = [];
+
+        // ---------- Fonctions ----------
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return {
+                r: parseInt(hex.substring(0, 2), 16),
+                g: parseInt(hex.substring(2, 4), 16),
+                b: parseInt(hex.substring(4, 6), 16)
+            };
+        }
+
+        function applyZoom() {
+            const wPercent = (zoomLevel * 100) + '%';
+            canvas.style.width = wPercent;
+            canvas.style.height = 'auto';
+            overlayCanvas.style.width = wPercent;
+            overlayCanvas.style.height = 'auto';
+            zoomLevelDisplay.textContent = Math.round(zoomLevel * 100) + '%';
+        }
+
+        function addColorToHistory(hex) {
+            const index = colorHistory.indexOf(hex);
+            if (index !== -1) {
+                colorHistory.splice(index, 1);
+            }
+            colorHistory.push(hex);
+            while (colorHistory.length > 12) {
+                colorHistory.shift();
+            }
+            currentHex = hex;
+            colorSwatch.style.backgroundColor = hex;
+            colorText.textContent = hex;
+            renderHistory();
+        }
+
+        function renderHistory() {
+            historyContainer.innerHTML = '';
+            const recent = colorHistory.slice(-12);
+            recent.forEach(hex => {
+                const swatch = document.createElement('div');
+                swatch.className = 'history-swatch';
+                swatch.style.backgroundColor = hex;
+                swatch.title = hex;
+                swatch.addEventListener('click', () => {
+                    addColorToHistory(hex);
+                    if (selectedRegions.length > 0 && imageLoaded) {
+                        const { r, g, b } = hexToRgb(hex);
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const data = imageData.data;
+                        for (const sel of selectedRegions) {
+                            for (const idx of sel.region) {
+                                const off = idx * 4;
+                                data[off] = r;
+                                data[off+1] = g;
+                                data[off+2] = b;
+                            }
+                        }
+                        ctx.putImageData(imageData, 0, 0);
+                    }
+                });
+                historyContainer.appendChild(swatch);
+            });
+        }
+
+        function clearSelection() {
+            selectedRegions = [];
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        }
+
+        function floodFill(x, y) {
+            const w = canvas.width, h = canvas.height;
+            const imageData = ctx.getImageData(0, 0, w, h);
+            const data = imageData.data;
+            const visited = new Uint8Array(w * h);
+            const startIdx = y * w + x;
+            const pOff = startIdx * 4;
+            if (data[pOff] < 30 && data[pOff+1] < 30 && data[pOff+2] < 30) return null;
+
+            const queue = [startIdx];
+            visited[startIdx] = 1;
+            const region = [startIdx];
+            const dirs = [[0,-1],[1,0],[0,1],[-1,0]];
+
+            while (queue.length) {
+                const idx = queue.shift();
+                const cx = idx % w, cy = Math.floor(idx / w);
+                for (const [dx, dy] of dirs) {
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                    const nIdx = ny * w + nx;
+                    if (visited[nIdx]) continue;
+                    const off = nIdx * 4;
+                    if (!(data[off] < 30 && data[off+1] < 30 && data[off+2] < 30)) {
+                        visited[nIdx] = 1;
+                        queue.push(nIdx);
+                        region.push(nIdx);
+                    }
+                }
+            }
+            return { region, visited };
+        }
+
+        function drawSingleContour(region, visited) {
+            const w = canvas.width, h = canvas.height;
+            overlayCtx.fillStyle = '#ff0000';
+            const borderSet = new Set();
+            const dirs = [[0,-1],[1,0],[0,1],[-1,0]];
+            for (const idx of region) {
+                const cx = idx % w, cy = Math.floor(idx / w);
+                for (const [dx, dy] of dirs) {
+                    const nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                    const nIdx = ny * w + nx;
+                    if (!visited[nIdx]) {
+                        borderSet.add(idx);
+                        break;
+                    }
+                }
+            }
+            const thickBorder = new Set(borderSet);
+            let currentBorder = new Set(borderSet);
+            for (let d = 0; d < 5; d++) {
+                const newBorder = new Set();
+                for (const idx of region) {
+                    if (currentBorder.has(idx)) continue;
+                    const cx = idx % w, cy = Math.floor(idx / w);
+                    for (const [dx, dy] of dirs) {
+                        const nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                        const nIdx = ny * w + nx;
+                        if (currentBorder.has(nIdx)) {
+                            newBorder.add(idx);
+                            break;
+                        }
+                    }
+                }
+                for (const idx of newBorder) {
+                    thickBorder.add(idx);
+                    currentBorder.add(idx);
+                }
+            }
+            for (const idx of thickBorder) {
+                const x = idx % w;
+                const y = Math.floor(idx / w);
+                overlayCtx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        function drawAllContours() {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            for (const sel of selectedRegions) {
+                drawSingleContour(sel.region, sel.visited);
+            }
+        }
+
+        function isSameRegion(regionA, regionB) {
+            if (regionA.length !== regionB.length) return false;
+            const set = new Set(regionB);
+            return regionA.every(idx => set.has(idx));
+        }
+
+        function onCanvasClick(e) {
+            if (!imageLoaded) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = Math.floor((e.clientX - rect.left) * scaleX);
+            const y = Math.floor((e.clientY - rect.top) * scaleY);
+            if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return;
+
+            if (isPipetteActive) {
+                const pixel = ctx.getImageData(x, y, 1, 1).data;
+                const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(c => c.toString(16).padStart(2, '0')).join('');
+                addColorToHistory(hex);
+                return;
+            }
+
+            if (isHandActive) {
+                const res = floodFill(x, y);
+                if (!res) return;
+                let foundIndex = -1;
+                for (let i = 0; i < selectedRegions.length; i++) {
+                    if (isSameRegion(res.region, selectedRegions[i].region)) {
+                        foundIndex = i;
+                        break;
+                    }
+                }
+                if (foundIndex !== -1) {
+                    selectedRegions.splice(foundIndex, 1);
+                } else {
+                    selectedRegions.push({ region: res.region, visited: res.visited });
+                }
+                drawAllContours();
+                const pixel = ctx.getImageData(x, y, 1, 1).data;
+                const hex = '#' + [pixel[0], pixel[1], pixel[2]].map(c => c.toString(16).padStart(2, '0')).join('');
+                addColorToHistory(hex);
+            }
+        }
+
+        function loadImage(file) {
+            const img = new Image();
+            img.onload = () => {
+                let width = img.naturalWidth;
+                let height = img.naturalHeight;
+
+                if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+                    const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+                    width = Math.round(width * ratio);
+                    height = Math.round(height * ratio);
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = width;
+                    tempCanvas.height = height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.drawImage(img, 0, 0, width, height);
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(tempCanvas, 0, 0);
+                } else {
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0);
+                }
+
+                overlayCanvas.width = canvas.width;
+                overlayCanvas.height = canvas.height;
+
+                imageLoaded = true;
+                isPipetteActive = false;
+                isHandActive = false;
+                pipetteBtn.classList.remove('active');
+                handBtn.classList.remove('active');
+                canvas.style.cursor = 'default';
+                clearSelection();
+                currentHex = '#ffffff';
+                colorSwatch.style.backgroundColor = '#ffffff';
+                colorText.textContent = '#ffffff';
+                colorHistory.length = 0;
+                renderHistory();
+                zoomLevel = 1;
+                applyZoom();
+            };
+            img.src = URL.createObjectURL(file);
+        }
+
+        // ---------- Palette SVG ----------
+        function normalizeHex(hex) {
+            hex = hex.replace('#', '').toLowerCase();
+            if (hex.length === 3) {
+                hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+            }
+            if (hex.length !== 6) return null;
+            return '#' + hex;
+        }
+
+        function importPalette(svgString) {
+            try {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(svgString, "image/svg+xml");
+                const elements = doc.querySelectorAll('[fill]');
+                const colors = new Set();
+                for (const el of elements) {
+                    const fill = el.getAttribute('fill');
+                    if (!fill || fill === 'none' || fill === 'transparent') continue;
+                    if (fill.startsWith('#')) {
+                        const normalized = normalizeHex(fill);
+                        if (normalized) colors.add(normalized);
+                    }
+                }
+                if (colors.size === 0) {
+                    alert("Aucune couleur hexadécimale trouvée dans le SVG.");
+                    return false;
+                }
+                for (const col of colors) {
+                    addColorToHistory(col);
+                }
+                return true;
+            } catch (e) {
+                alert("Erreur lors du parsing du SVG. Vérifiez le format.");
+                return false;
+            }
+        }
+
+        // ---------- Export ----------
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Export PNG normal
+        function exportPNG() {
+            if (!imageLoaded) return;
+            canvas.toBlob(blob => {
+                downloadBlob(blob, 'image.png');
+            }, 'image/png');
+        }
+
+        // Export PNG transparent
+        function exportTransparentPNG() {
+            if (!imageLoaded) return;
+            const w = canvas.width, h = canvas.height;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = w;
+            tempCanvas.height = h;
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(canvas, 0, 0);
+            const imageData = tempCtx.getImageData(0, 0, w, h);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i], g = data[i+1], b = data[i+2];
+                if (r < 30 && g < 30 && b < 30) {
+                    data[i+3] = 0; // transparence
+                }
+            }
+            tempCtx.putImageData(imageData, 0, 0);
+            tempCanvas.toBlob(blob => {
+                downloadBlob(blob, 'image_transparent.png');
+            }, 'image/png');
+        }
+
+        // Export SVG vectoriel
+        function exportSVG() {
+            if (!imageLoaded) return;
+            const w = canvas.width, h = canvas.height;
+            const imageData = ctx.getImageData(0, 0, w, h);
+            const data = imageData.data;
+            const visited = new Uint8Array(w * h);
+            const dirs4 = [[0,-1],[1,0],[0,1],[-1,0]];
+            const blocks = [];
+
+            // Flood fill segmenté par couleur exacte
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const idx = y * w + x;
+                    if (visited[idx]) continue;
+                    const off = idx * 4;
+                    const r = data[off], g = data[off+1], b = data[off+2];
+                    if (r < 30 && g < 30 && b < 30) {
+                        visited[idx] = 1;
+                        continue;
+                    }
+                    const targetColor = `${r},${g},${b}`;
+                    const queue = [idx];
+                    visited[idx] = 1;
+                    const region = [];
+                    while (queue.length) {
+                        const curIdx = queue.shift();
+                        region.push(curIdx);
+                        const curX = curIdx % w, curY = Math.floor(curIdx / w);
+                        for (const [dx, dy] of dirs4) {
+                            const nx = curX + dx, ny = curY + dy;
+                            if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+                            const nIdx = ny * w + nx;
+                            if (visited[nIdx]) continue;
+                            const noff = nIdx * 4;
+                            const nr = data[noff], ng = data[noff+1], nb = data[noff+2];
+                            if (`${nr},${ng},${nb}` === targetColor) {
+                                visited[nIdx] = 1;
+                                queue.push(nIdx);
+                            }
+                        }
+                    }
+                    const hex = '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+                    blocks.push({ region, color: hex });
+                }
+            }
+
+            // Génération des chemins SVG avec trous
+            function regionToPathWithHoles(region, width, height) {
+                const binary = new Uint8Array(width * height);
+                for (const idx of region) binary[idx] = 1;
+                // Trouver un pixel de départ (le plus en haut à gauche)
+                let startIdx = -1, minX = Infinity, minY = Infinity;
+                for (const idx of region) {
+                    const x = idx % width, y = Math.floor(idx / width);
+                    if (y < minY || (y === minY && x < minX)) {
+                        minY = y; minX = x; startIdx = idx;
+                    }
+                }
+                if (startIdx === -1) return '';
+
+                function traceContour(binary, w, h, startX, startY) {
+                    const dirs = [[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1],[1,1]];
+                    const path = [];
+                    let curX = startX, curY = startY;
+                    let dir = 0;
+                    const visitedSet = new Set();
+                    const key = (x,y) => `${x},${y}`;
+                    const startKey = key(startX, startY);
+                    while (true) {
+                        const k = key(curX, curY);
+                        if (path.length > 0 && k === startKey) break;
+                        path.push([curX, curY]);
+                        visitedSet.add(k);
+                        let found = false;
+                        for (let i = 0; i < 8; i++) {
+                            const nd = (dir + i) % 8;
+                            const [dx, dy] = dirs[nd];
+                            const nx = curX + dx, ny = curY + dy;
+                            if (nx >= 0 && nx < w && ny >= 0 && ny < h && binary[ny * w + nx] === 1) {
+                                const nk = key(nx, ny);
+                                if (!visitedSet.has(nk) || (nx === startX && ny === startY && path.length > 2)) {
+                                    curX = nx; curY = ny;
+                                    dir = (nd + 4) % 8;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!found) break;
+                    }
+                    if (path.length < 2) return '';
+                    let d = `M${path[0][0]},${path[0][1]}`;
+                    for (let i = 1; i < path.length; i++) {
+                        d += `L${path[i][0]},${path[i][1]}`;
+                    }
+                    d += 'Z';
+                    return d;
+                }
+
+                const outerPath = traceContour(binary, width, height, minX, minY);
+                if (!outerPath) return '';
+
+                // Détection des trous (pixels 0 entourés par la région)
+                const state = new Uint8Array(width * height);
+                for (let i = 0; i < state.length; i++) state[i] = binary[i] ? 1 : 0;
+                // Flood fill depuis l'extérieur
+                const queue = [];
+                for (let x = 0; x < width; x++) {
+                    if (state[x] === 0) { queue.push(x); state[x] = 2; }
+                    if (state[(height-1)*width + x] === 0) { queue.push((height-1)*width + x); state[(height-1)*width + x] = 2; }
+                }
+                for (let y = 0; y < height; y++) {
+                    if (state[y*width] === 0) { queue.push(y*width); state[y*width] = 2; }
+                    if (state[y*width + width-1] === 0) { queue.push(y*width + width-1); state[y*width + width-1] = 2; }
+                }
+                const dirs4 = [[0,-1],[1,0],[0,1],[-1,0]];
+                while (queue.length) {
+                    const idx = queue.shift();
+                    const x = idx % width, y = Math.floor(idx / width);
+                    for (const [dx, dy] of dirs4) {
+                        const nx = x + dx, ny = y + dy;
+                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                        const nIdx = ny * width + nx;
+                        if (state[nIdx] === 0) {
+                            state[nIdx] = 2;
+                            queue.push(nIdx);
+                        }
+                    }
+                }
+                // Les pixels state === 0 sont des trous
+                let holes = [];
+                for (let i = 0; i < state.length; i++) {
+                    if (state[i] === 0) {
+                        // Extraire le contour du trou
+                        const holeBinary = new Uint8Array(width * height);
+                        const holeQueue = [i];
+                        state[i] = 3;
+                        while (holeQueue.length) {
+                            const idx = holeQueue.shift();
+                            holeBinary[idx] = 1;
+                            const x = idx % width, y = Math.floor(idx / width);
+                            for (const [dx, dy] of dirs4) {
+                                const nx = x + dx, ny = y + dy;
+                                if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+                                const nIdx = ny * width + nx;
+                                if (state[nIdx] === 0) {
+                                    state[nIdx] = 3;
+                                    holeQueue.push(nIdx);
+                                }
+                            }
+                        }
+                        // Trouver le point de départ pour le contour du trou
+                        let holeMinX = Infinity, holeMinY = Infinity, holeStartIdx = -1;
+                        for (let j = 0; j < holeBinary.length; j++) {
+                            if (holeBinary[j] === 1) {
+                                const x = j % width, y = Math.floor(j / width);
+                                if (y < holeMinY || (y === holeMinY && x < holeMinX)) {
+                                    holeMinY = y; holeMinX = x; holeStartIdx = j;
+                                }
+                            }
+                        }
+                        if (holeStartIdx !== -1) {
+                            const holePath = traceContour(holeBinary, width, height, holeMinX, holeMinY);
+                            if (holePath) holes.push(holePath);
+                        }
+                    }
+                }
+                let fullPath = outerPath;
+                for (const hp of holes) fullPath += ' ' + hp;
+                return fullPath;
+            }
+
+            // Construction du SVG
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">`;
+            svg += `<rect width="${w}" height="${h}" fill="#000" />`; // fond noir
+            for (const block of blocks) {
+                const pathD = regionToPathWithHoles(block.region, w, h);
+                if (pathD) {
+                    svg += `<path d="${pathD}" fill="${block.color}" fill-rule="evenodd" />`;
+                }
+            }
+            svg += '</svg>';
+
+            const blob = new Blob([svg], { type: 'image/svg+xml' });
+            downloadBlob(blob, 'image.svg');
+        }
+
+        // Événements UI
+        fileInput.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (file) loadImage(file);
+        });
+
+        pipetteBtn.addEventListener('click', () => {
+            if (!imageLoaded) return alert("Charge une image !");
+            if (isHandActive) {
+                isHandActive = false;
+                handBtn.classList.remove('active');
+                clearSelection();
+            }
+            isPipetteActive = !isPipetteActive;
+            pipetteBtn.classList.toggle('active');
+            canvas.style.cursor = isPipetteActive ? 'crosshair' : 'default';
+        });
+
+        handBtn.addEventListener('click', () => {
+            if (!imageLoaded) return alert("Charge une image !");
+            if (isPipetteActive) {
+                isPipetteActive = false;
+                pipetteBtn.classList.remove('active');
+            }
+            isHandActive = !isHandActive;
+            handBtn.classList.toggle('active');
+            canvas.style.cursor = isHandActive ? 'pointer' : 'default';
+            if (!isHandActive) {
+                clearSelection();
+            }
+        });
+
+        canvas.addEventListener('click', onCanvasClick);
+
+        zoomInBtn.addEventListener('click', () => {
+            if (!imageLoaded) return;
+            zoomLevel = Math.min(zoomLevel + 0.2, 10);
+            applyZoom();
+        });
+        zoomOutBtn.addEventListener('click', () => {
+            if (!imageLoaded) return;
+            zoomLevel = Math.max(zoomLevel - 0.2, 0.1);
+            applyZoom();
+        });
+        document.querySelector('.image-wrapper').addEventListener('wheel', e => {
+            if (!imageLoaded) return;
+            e.preventDefault();
+            zoomLevel += e.deltaY < 0 ? 0.1 : -0.1;
+            zoomLevel = Math.min(Math.max(zoomLevel, 0.1), 10);
+            applyZoom();
+        }, { passive: false });
+
+        document.addEventListener('keydown', e => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (!imageLoaded) return;
+                if (isHandActive) {
+                    isHandActive = false;
+                    handBtn.classList.remove('active');
+                    clearSelection();
+                }
+                isPipetteActive = !isPipetteActive;
+                pipetteBtn.classList.toggle('active');
+                canvas.style.cursor = isPipetteActive ? 'crosshair' : 'default';
+            }
+        });
+
+        // Modale palette
+        paletteBtn.addEventListener('click', () => {
+            paletteModal.style.display = 'block';
+        });
+        closeModalBtn.addEventListener('click', () => {
+            paletteModal.style.display = 'none';
+        });
+        window.addEventListener('click', (e) => {
+            if (e.target === paletteModal) paletteModal.style.display = 'none';
+            if (e.target === exportModal) exportModal.style.display = 'none';
+        });
+        importPaletteBtn.addEventListener('click', () => {
+            const svg = svgInput.value.trim();
+            if (!svg) return;
+            const success = importPalette(svg);
+            if (success) {
+                svgInput.value = '';
+                paletteModal.style.display = 'none';
+            }
+        });
+
+        // Modale export
+        exportBtn.addEventListener('click', () => {
+            if (!imageLoaded) return alert("Chargez d'abord une image !");
+            exportModal.style.display = 'block';
+        });
+        closeExportModal.addEventListener('click', () => {
+            exportModal.style.display = 'none';
+        });
+        exportPNGBtn.addEventListener('click', () => {
+            exportPNG();
+            exportModal.style.display = 'none';
+        });
+        exportTransparentPNGBtn.addEventListener('click', () => {
+            exportTransparentPNG();
+            exportModal.style.display = 'none';
+        });
+        exportSVGBtn.addEventListener('click', () => {
+            exportSVG();
+            exportModal.style.display = 'none';
+        });
+
+        // Init
+        colorSwatch.style.backgroundColor = '#ffffff';
+        colorText.textContent = '#ffffff';
+        applyZoom();
+    </script>
+
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));}</script>
+</body>
+</html>
